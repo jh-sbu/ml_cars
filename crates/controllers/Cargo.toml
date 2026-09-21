@@ -1,0 +1,9 @@
+[package]
+name = "ml-cars-controllers"
+version = "0.1.0"
+edition = "2024"
+[dependencies]
+ml-cars-sim = { path = "../sim" }
+serde.workspace = true
+serde_json.workspace = true
+rayon.workspace = true

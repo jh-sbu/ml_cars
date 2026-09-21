@@ -1,0 +1,65 @@
+{
+  "method": "behavior_cloning",
+  "seed": 7,
+  "samples": 12257,
+  "epochs": 160,
+  "expert_episodes_per_terrain": 16,
+  "torch": "2.14.0+cpu",
+  "python": "3.12.13",
+  "platform": "Linux-7.2.3-arch1-3-x86_64-with-glibc2.44",
+  "cargo_lock_sha256": "29211969526ae697fd26b97fc9f27e3d21e9e857ce94e023520b632c832d44af",
+  "policy_sha256": "332122d0ff898509e16bd8836b1208f1dc73fdc048ab5300f0423f823b373966",
+  "parity_samples": 512,
+  "parity_max_absolute_error": 2.1606683731079102e-07,
+  "parity_tolerance": 2e-05,
+  "evaluation": [
+    {
+      "terrain": "flat",
+      "seed": 1007,
+      "reason": "success",
+      "reward": 109.64834436308593
+    },
+    {
+      "terrain": "flat",
+      "seed": 1008,
+      "reason": "success",
+      "reward": 109.61005219304934
+    },
+    {
+      "terrain": "flat",
+      "seed": 1009,
+      "reason": "success",
+      "reward": 109.90491124521941
+    },
+    {
+      "terrain": "flat",
+      "seed": 1010,
+      "reason": "success",
+      "reward": 109.93028395227157
+    },
+    {
+      "terrain": "hills",
+      "seed": 1007,
+      "reason": "success",
+      "reward": 109.87740846164525
+    },
+    {
+      "terrain": "hills",
+      "seed": 1008,
+      "reason": "success",
+      "reward": 109.84679971821606
+    },
+    {
+      "terrain": "hills",
+      "seed": 1009,
+      "reason": "success",
+      "reward": 110.07586718862876
+    },
+    {
+      "terrain": "hills",
+      "seed": 1010,
+      "reason": "success",
+      "reward": 110.01673806807958
+    }
+  ]
+}

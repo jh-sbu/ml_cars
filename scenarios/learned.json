@@ -1,0 +1,1 @@
+{"version":1,"terrain":"hills","mixed_material":true,"vehicles":[{"id":"learned_car","kind":"car","controller":"policy:models/baseline.json","aware":true,"spawn":[0,0]}]}

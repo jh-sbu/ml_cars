@@ -1,0 +1,1 @@
+{"version":1,"terrain":"hills","mixed_material":true,"vehicles":[{"id":"car_0","kind":"car","controller":"native","aware":true,"spawn":[0,0]},{"id":"truck_0","kind":"truck","controller":"native","aware":false,"spawn":[0,14]},{"id":"car_1","kind":"car","controller":"native","aware":false,"spawn":[-6,32]}]}

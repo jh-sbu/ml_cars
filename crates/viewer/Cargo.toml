@@ -1,0 +1,8 @@
+[package]
+name = "ml-cars-viewer"
+version = "0.1.0"
+edition = "2024"
+[dependencies]
+ml-cars-sim = { path = "../sim" }
+ml-cars-controllers = { path = "../controllers" }
+bevy = { version = "=0.18.1", default-features = false, features = ["std", "async_executor", "multi_threaded", "bevy_asset", "bevy_color", "bevy_core_pipeline", "bevy_gizmos", "bevy_gizmos_render", "bevy_pbr", "bevy_render", "bevy_scene", "bevy_window", "bevy_winit", "bevy_text", "bevy_ui", "bevy_ui_render", "default_font", "x11", "png", "tonemapping_luts", "zstd_rust"] }
