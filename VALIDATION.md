@@ -35,7 +35,8 @@ cargo run --release -- run scenarios/learned.json 42 /tmp/ml-cars-learned-replay
 Gymnasium emits two advisory warnings for deliberately unbounded observation
 spaces (linear and angular velocities). No check fails. The exported policy is
 feedforward behavior cloning, with a schema-checked JSON deployment format;
-ONNX graph execution and recurrent neural models are not implemented.
+Basic feedforward CPU ONNX execution has since been added; see the ONNX
+validation section below. Recurrent neural models are not implemented.
 
 ## Throughput
 
@@ -79,4 +80,49 @@ Determinism is checked within this build/platform. Pose recordings replay stored
 state; they are not action logs or checkpoints. Model files are unnecessary for
 playback. Recurrent-controller interfaces can own per-instance state, but the
 supplied learned policy has no recurrence. Terrain streaming, deformable soil,
-cameras, distributed execution, and ONNX remain outside this implementation.
+cameras, distributed execution, and recurrent/GPU ONNX execution remain outside this implementation.
+
+## ONNX validation
+
+Basic CPU ONNX support was validated on the same host with `ort 2.0.0-rc.13`
+(API 22), ONNX Runtime 1.30.0, ONNX 1.23.0, onnxscript 0.7.2, and PyTorch
+2.14.0+cpu. The original saved JSON weights were converted without retraining.
+The single ONNX file contains the normalization, weights, and policy metadata.
+Its [report](models/baseline.onnx.report.json) records dependency/model hashes,
+512-sample parity, and eight successful held-out course evaluations.
+
+- Maximum PyTorch/Rust ONNX absolute error: **1.6391277313232422e-7**
+  (tolerance `2e-5`). Verification includes a standalone native process.
+- Native ONNX evaluation on the hilly course succeeds in 388 steps with seed 42.
+- **19 Rust tests** pass (17 core/controller tests plus two viewer tests).
+- **26 Python tests** pass with ONNX dependencies and `ORT_DYLIB_PATH` configured.
+  Checks include PyTorch/JSON/ONNX parity, re-exporting, tensor names/shapes/dtypes,
+  metadata, rejected recurrent inputs, invalid outputs, missing runtimes, mixed
+  JSON/native/ONNX controllers, batch/serial equivalence, and resets.
+- Controller errors and invalid inferred actions do not partially advance batch
+  physics. Reset after a runtime failure before retrying: preparing actions may
+  have updated native controller state.
+- A one-epoch training smoke test exercises `--onnx-output` and both parity paths;
+  its untrained driving scores are not included in the trained-policy results.
+- Workspace Clippy passes with warnings denied. Live ONNX rendering was launched
+  and the screenshot inspected for the vehicle, route, HUD and sensor rays.
+  Recorded ONNX playback was also launched successfully with an intentionally
+  invalid runtime-library path, confirming that pose playback needs no runtime.
+
+A release comparison used 16 worlds, four Rayon workers, 2,000 steps/world,
+alternating flat/hilly terrain, and three vehicles/world. Both runs used the
+same scenario and seeds: `scenarios/onnx-mixed.json`, with only the first
+vehicle's model switched between `.json` and `.onnx`. The other vehicles were
+one native truck and one JSON-policy car. Each ONNX vehicle has its own CPU
+session configured with one intra-op and one inter-op thread.
+
+| First vehicle's backend | World-steps/s | Elapsed | Peak process RSS |
+| --- | ---: | ---: | ---: |
+| Rust JSON MLP | 33,687 | 0.950 s | 8,400 KiB |
+| ONNX Runtime CPU | 30,800 | 1.039 s | 37,740 KiB |
+
+These are single-run point measurements, with initialization excluded and
+in-run resets included. ONNX adds runtime/session memory and did not improve
+throughput for this small MLP. This comparison uses a different controller mix
+from the original MVP benchmark above. GPU execution, recurrent inputs, and
+cross-vehicle inference batching remain outside basic ONNX support.

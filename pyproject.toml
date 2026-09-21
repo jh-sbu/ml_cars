@@ -11,6 +11,7 @@ dependencies = ["numpy>=2,<3", "gymnasium>=1,<2", "pettingzoo>=1.24,<2"]
 [project.optional-dependencies]
 train = ["torch>=2.6"]
 test = ["pytest>=8"]
+onnx = ["torch>=2.6", "onnx>=1.18,<2", "onnxscript>=0.3,<1", "onnxruntime>=1.22,<2"]
 
 [tool.maturin]
 manifest-path = "crates/python/Cargo.toml"

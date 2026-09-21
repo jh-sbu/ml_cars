@@ -1,4 +1,4 @@
-use ml_cars_controllers::{Batch, Policy, Recording, Runner};
+use ml_cars_controllers::{Batch, Recording, Runner, load_policy};
 use ml_cars_sim::{OBS_DIM, Scenario};
 use std::{env, fs, time::Instant};
 fn run() -> Result<(), String> {
@@ -99,7 +99,7 @@ fn run() -> Result<(), String> {
             );
         }
         "infer" => {
-            let policy = Policy::load(args.get(2).ok_or("infer needs model path")?)?;
+            let mut policy = load_policy(args.get(2).ok_or("infer needs model path")?)?;
             let observations: Vec<[f32; OBS_DIM]> = serde_json::from_str(
                 &fs::read_to_string(args.get(3).ok_or("infer needs observations JSON path")?)
                     .map_err(|e| e.to_string())?,
@@ -110,14 +110,14 @@ fn run() -> Result<(), String> {
                 serde_json::to_string(
                     &observations
                         .iter()
-                        .map(|o| policy.infer(o))
-                        .collect::<Vec<_>>()
+                        .map(|o| policy.action(o))
+                        .collect::<Result<Vec<_>, _>>()?
                 )
                 .map_err(|e| e.to_string())?
             );
         }
         _ => println!(
-            "ml_cars run [scenario.json] [seed] [recording.json]\nml_cars bench [worlds=16] [steps=200] [scenario=scenarios/mixed.json]\nml_cars infer <policy.json> <observations.json>\nViewer: cargo run -p ml-cars-viewer -- [scenario.json | --replay recording.json]"
+            "ml_cars run [scenario.json] [seed] [recording.json]\nml_cars bench [worlds=16] [steps=200] [scenario=scenarios/mixed.json]\nml_cars infer <policy.json|policy.onnx> <observations.json>\nViewer: cargo run -p ml-cars-viewer -- [scenario.json | --replay recording.json]"
         ),
     }
     Ok(())

@@ -1,0 +1,1 @@
+{"version":1,"terrain":"hills","mixed_material":true,"vehicles":[{"id":"onnx_car","kind":"car","controller":"policy:models/baseline.onnx","aware":false,"spawn":[0,0]},{"id":"native_truck","kind":"truck","controller":"native","aware":true,"spawn":[0,18]},{"id":"json_car","kind":"car","controller":"policy:models/baseline.json","aware":false,"spawn":[-6,36]}]}

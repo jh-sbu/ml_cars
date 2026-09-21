@@ -2,7 +2,7 @@
 
 A Rust vehicle training gym with batched Python environments, native policy
 execution, and a Bevy 3D viewer. The MVP in [DESIGN.md](DESIGN.md) is implemented
-with Rapier raycast wheels and a small feedforward policy deployment format.
+with Rapier raycast wheels and feedforward policy deployment through JSON or ONNX.
 
 Run commands from the repository root. Rust dependencies are locked in
 `Cargo.lock`; Rust 1.89+ and Python 3.10+ are required. The viewer needs a graphics
@@ -84,7 +84,8 @@ C-contiguous float32 `[world, vehicle, 2]`. Native and learned slots ignore the
 provided values unless `override_native=True`; all values must still be finite
 and in range. `step_native()` needs no arrays when every active vehicle has an
 internal controller. Rust releases the GIL during stepping and uses Rayon across
-worlds; control its worker count with `RAYON_NUM_THREADS`. Returned arrays own
+worlds; control its worker count with `RAYON_NUM_THREADS`. ONNX inference uses one
+CPU thread per vehicle session. Returned arrays own
 their memory and remain valid after subsequent steps.
 
 There is **no automatic reset**. Inspect the final result, then use
@@ -94,7 +95,9 @@ Missing actions, invalid shapes/values, and completed-world errors are checked
 before any world/controller advances. Finished agents leave PettingZoo's active
 agent list; their final observations remain in the final step result and info.
 Their physical chassis remains with braking applied and can still be hit or
-slide on slopes. Termination reasons are `success`, `collision`, and `offroad`;
+slide on slopes. Controller inference failures return errors before any batch
+physics advances; reset the batch before retrying, since native controller state
+may have changed while preparing actions. Termination reasons are `success`, `collision`, and `offroad`;
 `time_limit` is truncation. Gymnasium ends when its external vehicle finishes,
 even if background vehicles remain active.
 
@@ -153,18 +156,18 @@ Model paths resolve relative to the working directory.
 ## Deployment and reproducibility
 
 `crates/sim` has no Python, Bevy, or controller dependency. Controllers implement
-`Controller::action` and `reset`, with one instance per vehicle. The native
+`Controller::action` (returning `Result<Action, String>`) and `reset`, with one instance per vehicle. The native
 follower's integral state is independent per instance and reset with the world;
 compatible neural weights share an `Arc` within a world. The supplied neural
-policy is feedforward and has no hidden state.
+policy is feedforward and has no hidden state. Each ONNX vehicle owns an
+independent runtime session.
 
 The portable JSON format stores schema version, exact observation/action schema
 IDs, normalization `(observation - mean) / scale`, and row-major dense layers.
 Every layer applies tanh, including the final two normalized actions. Shape,
-finite-value, and schema validation happens on load. This deliberately supports
-only Linear/Tanh MLPs; ONNX and recurrent neural policies remain future work.
-The recommended ONNX/ort stack in DESIGN.md was not required to prove this
-MVP's Python-to-Rust deployment path.
+finite-value, and schema validation happens on load. The JSON backend supports
+only Linear/Tanh MLPs. ONNX policies use the separate backend described below;
+recurrent neural policies remain future work.
 
 Same seed + scenario + actions produce identical replay on the validated build
 and platform. Tests compare exact state/observation values; cross-platform,
@@ -175,6 +178,72 @@ Recordings are versioned **pose snapshots**, with scenario and seed; they are
 for visualization, not action logs or physics checkpoints. Playback uses stored
 poses and does not require the original model files. Live observations are not
 reconstructed from recordings.
+
+## ONNX policies
+
+Basic **CPU, feedforward ONNX** support is included. `policy:<path>` selects ONNX
+when the filename ends in `.onnx`; JSON models keep using the existing Rust MLP
+backend. The CLI, Python `Batch` and adapters, `policy_actions`, and viewer all
+use the same loader. The included `models/baseline.onnx` was converted from the
+saved JSON weights without retraining. See its
+[parity/evaluation report](models/baseline.onnx.report.json).
+
+Install the export tools and CPU runtime, then locate the runtime library:
+
+```sh
+source .venv/bin/activate
+uv pip install 'onnx>=1.18,<2' 'onnxscript>=0.3,<1' 'onnxruntime>=1.22,<2'
+# PyTorch is also needed for export; install it as shown above.
+export ORT_DYLIB_PATH="$(python -m ml_cars.onnx_runtime)"
+
+# Run the included model entirely in Rust
+cargo run --release -- run scenarios/onnx.json
+cargo run --release -- run scenarios/onnx-mixed.json
+cargo run -p ml-cars-viewer -- scenarios/onnx.json
+
+# Convert a saved JSON policy and verify parity + eight complete evaluations
+python -m ml_cars.export_onnx --input models/baseline.json --output models/baseline.onnx
+
+# Or export both formats after training a new policy
+python -m ml_cars.train --output models/new.json --onnx-output models/new.onnx
+
+# Integration tests; ONNX tests skip when dependencies/runtime path are absent
+python -m pytest -q
+```
+
+For a package installation, `uv pip install '.[onnx]'` installs the export/runtime
+extra. The runtime-path helper is only a setup convenience; Rust never launches
+Python to infer actions. For native deployment, ship/install the CPU ONNX Runtime
+shared library and set `ORT_DYLIB_PATH` to its absolute path. A library named
+`libonnxruntime.so`, `libonnxruntime.dylib`, or `onnxruntime.dll` next to the
+executable or on the OS loader path also works. The `ort` crate is pinned to
+`2.0.0-rc.13` with API 22 and runtime dynamic loading; CPU ONNX Runtime **1.22+**
+is required (1.30.0 validated). No native runtime is downloaded during Cargo
+builds. JSON/native-only scenarios and pose playback need no ONNX library.
+The chosen library is process-global; set its path before first ONNX use.
+
+The exporter uses `torch.onnx.export(..., dynamo=True)` with opset 18, embeds
+weights and `(observations - mean) / scale` in one `.onnx` file, and names its
+float32 tensors `observations[1,18]` and `actions[1,2]`. Rust also accepts a dynamic
+leading batch dimension, but executes **one vehicle at a time**; the numerical
+Python API loops over rows. Extra inputs/outputs, hidden-state tensors, other
+dtypes, or different feature widths are rejected. Outputs must be finite and
+within `[-1,1]`; they are never silently clipped.
+
+Required ONNX custom metadata:
+
+| Key | Value |
+| --- | --- |
+| `ml_cars.version` | `1` |
+| `ml_cars.observation_schema` | `ml_cars/obs-v1` |
+| `ml_cars.action_schema` | `throttle-steering/tanh-v1` |
+| `ml_cars.normalization` | `embedded/v1` |
+| `ml_cars.recurrent` | `false` |
+
+Other feedforward ONNX graphs can use this contract if the CPU runtime supports
+their operators. The supported export utility currently converts the project's
+Linear/Tanh policies. GPU execution providers, recurrent policies, and grouping
+multiple vehicles into a single ONNX inference call remain outside basic support.
 
 ## Validation and performance
 
@@ -193,5 +262,5 @@ validation, and the Gymnasium/PettingZoo contracts. See [VALIDATION.md](VALIDATI
 for measured results and limitations. The physics is a research starting point:
 raycast wheels, rigid ground, fixed suspension tuning, and simplified tire forces
 have not been calibrated against real vehicles. Cameras, deformable terrain,
-streaming maps, distributed training, and general neural graph execution are
+streaming maps, distributed training, and GPU/recurrent neural execution are
 outside this implementation.

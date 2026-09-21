@@ -1,9 +1,11 @@
+mod onnx;
 use ml_cars_sim::{Action, OBS_DIM, Observation, Scenario, Snapshot, StepResult, World};
+pub use onnx::OnnxPolicy;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{fs, sync::Arc};
 pub trait Controller: Send + Sync {
-    fn action(&mut self, observation: &Observation) -> Action;
+    fn action(&mut self, observation: &Observation) -> Result<Action, String>;
     fn reset(&mut self);
 }
 pub struct PathFollower {
@@ -21,7 +23,7 @@ impl PathFollower {
     }
 }
 impl Controller for PathFollower {
-    fn action(&mut self, o: &Observation) -> Action {
+    fn action(&mut self, o: &Observation) -> Result<Action, String> {
         let target = if o[17] > 0.5 && o[14] < 0.35 && o[13].abs() < 0.1 {
             0.
         } else {
@@ -29,10 +31,10 @@ impl Controller for PathFollower {
         };
         let error = target - o[0] * 10.;
         self.integral = (self.integral + error * self.dt).clamp(-1., 1.);
-        Action {
+        Ok(Action {
             throttle: (error * 0.5 + self.integral * 0.1).clamp(-1., 1.),
             steering: (o[3].atan2(o[4]) * 1.8 - o[2] * 0.15).clamp(-1., 1.),
-        }
+        })
     }
     fn reset(&mut self) {
         self.integral = 0.;
@@ -122,10 +124,25 @@ pub struct NeuralController {
     pub policy: Arc<Policy>,
 }
 impl Controller for NeuralController {
-    fn action(&mut self, o: &Observation) -> Action {
-        self.policy.infer(o)
+    fn action(&mut self, o: &Observation) -> Result<Action, String> {
+        Ok(self.policy.infer(o))
     }
     fn reset(&mut self) {}
+}
+/// Load a feedforward JSON or ONNX policy through the same fallible interface.
+pub fn load_policy(path: &str) -> Result<Box<dyn Controller>, String> {
+    if is_onnx(path) {
+        Ok(Box::new(OnnxPolicy::load(path)?))
+    } else {
+        Ok(Box::new(NeuralController {
+            policy: Arc::new(Policy::load(path)?),
+        }))
+    }
+}
+fn is_onnx(path: &str) -> bool {
+    std::path::Path::new(path)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("onnx"))
 }
 pub struct Runner {
     pub world: World,
@@ -133,6 +150,7 @@ pub struct Runner {
 }
 impl Runner {
     pub fn new(scenario: Scenario, seed: u64) -> Result<Self, String> {
+        scenario.validate()?;
         let mut policies = std::collections::HashMap::new();
         let controllers = scenario
             .vehicles
@@ -144,6 +162,9 @@ impl Runner {
                         as Box<dyn Controller>),
                     s => {
                         let path = s.strip_prefix("policy:").ok_or("invalid controller")?;
+                        if is_onnx(path) {
+                            return load_policy(path).map(Some);
+                        }
                         let policy = if let Some(p) = policies.get(path) {
                             Arc::clone(p)
                         } else {
@@ -182,6 +203,10 @@ impl Runner {
         Ok(())
     }
     pub fn step(&mut self, external: &[Option<Action>]) -> Result<StepResult, String> {
+        let actions = self.prepare_actions(external)?;
+        self.world.step(&actions)
+    }
+    fn prepare_actions(&mut self, external: &[Option<Action>]) -> Result<Vec<Action>, String> {
         self.validate(external)?;
         let obs = self.world.observations();
         let active = self.world.active();
@@ -191,15 +216,21 @@ impl Runner {
             .enumerate()
             .map(|(i, c)| {
                 if !active[i] {
-                    Action::default()
+                    Ok(Action::default())
+                } else if let Some(action) = external[i] {
+                    Ok(action)
                 } else {
-                    external[i].unwrap_or_else(|| {
-                        c.as_mut().expect("validated controller").action(&obs[i])
-                    })
+                    c.as_mut()
+                        .expect("validated controller")
+                        .action(&obs[i])
+                        .map_err(|e| {
+                            format!("controller {}: {e}", self.world.scenario.vehicles[i].id)
+                        })
                 }
             })
-            .collect();
-        self.world.step(&actions)
+            .collect::<Result<_, String>>()?;
+        self.world.validate_actions(&actions)?;
+        Ok(actions)
     }
     pub fn reset(&mut self, seed: u64) -> Result<StepResult, String> {
         let result = self.world.reset(seed)?;
@@ -232,10 +263,18 @@ impl Batch {
         for (w, a) in self.worlds.iter().zip(actions) {
             w.validate(a)?;
         }
-        self.worlds
+        // Runtime inference is fallible too. Collect every world's actions
+        // before advancing physics, so an error cannot leave a partial batch.
+        let prepared = self
+            .worlds
             .par_iter_mut()
             .zip(actions)
-            .map(|(w, a)| w.step(a))
+            .map(|(w, a)| w.prepare_actions(a))
+            .collect::<Result<Vec<_>, _>>()?;
+        self.worlds
+            .par_iter_mut()
+            .zip(&prepared)
+            .map(|(w, a)| w.world.step(a))
             .collect()
     }
 }
@@ -268,5 +307,43 @@ impl Recording {
     pub fn save(&self, path: &str) -> Result<(), String> {
         fs::write(path, serde_json::to_vec(self).map_err(|e| e.to_string())?)
             .map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(test)]
+mod inference_failures {
+    use super::*;
+    struct FailingPolicy {
+        nonfinite: bool,
+    }
+    impl Controller for FailingPolicy {
+        fn action(&mut self, _: &Observation) -> Result<Action, String> {
+            if self.nonfinite {
+                Ok(Action {
+                    throttle: f32::NAN,
+                    steering: 0.,
+                })
+            } else {
+                Err("test inference failure".into())
+            }
+        }
+        fn reset(&mut self) {}
+    }
+    #[test]
+    fn inference_errors_do_not_partially_advance_batch_physics() {
+        for nonfinite in [false, true] {
+            let mut batch = Batch::new(Scenario::default(), &[1, 2]).unwrap();
+            batch.worlds[1].controllers[0] = Some(Box::new(FailingPolicy { nonfinite }));
+            let before: Vec<_> = batch
+                .worlds
+                .iter()
+                .map(|w| w.world.observations())
+                .collect();
+            assert!(batch.step(&[vec![None], vec![None]]).is_err());
+            for (world, observations) in batch.worlds.iter().zip(before) {
+                assert_eq!(world.world.steps, 0);
+                assert_eq!(world.world.observations(), observations);
+            }
+        }
     }
 }

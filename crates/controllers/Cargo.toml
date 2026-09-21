@@ -7,3 +7,5 @@ ml-cars-sim = { path = "../sim" }
 serde.workspace = true
 serde_json.workspace = true
 rayon.workspace = true
+# Load the native runtime only when an ONNX policy is requested.
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "load-dynamic", "api-22"] }

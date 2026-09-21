@@ -1,7 +1,7 @@
 """Reproducible behavior cloning baseline, portable export, and native parity check.
 
 Run: python -m ml_cars.train --output models/baseline.json
-The exported format supports feedforward Linear/Tanh layers. It is not ONNX.
+Exports feedforward Linear/Tanh layers to JSON, with optional ONNX export.
 """
 import argparse
 import hashlib
@@ -79,10 +79,15 @@ def evaluate(path, seed):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path("models/baseline.json"))
+    parser.add_argument("--onnx-output", type=Path, help="also export a schema-checked ONNX policy (requires [onnx] dependencies)")
     parser.add_argument("--episodes", type=int, default=16, help="expert episodes per terrain")
     parser.add_argument("--epochs", type=int, default=160)
     parser.add_argument("--seed", type=int, default=7)
     args = parser.parse_args()
+    if args.output.suffix.lower() != ".json":
+        parser.error("--output must end in .json; use --onnx-output for ONNX")
+    if args.onnx_output and args.onnx_output.suffix.lower() != ".onnx":
+        parser.error("--onnx-output must end in .onnx")
     if args.episodes < 1 or args.epochs < 1:
         parser.error("episodes and epochs must be positive")
     torch.set_num_threads(1)
@@ -109,6 +114,15 @@ def main():
     max_error = verify(model, mean, scale, args.output, samples)
     evaluation = evaluate(args.output, args.seed + 1000)
     report = {"method": "behavior_cloning", "seed": args.seed, "samples": len(obs), "epochs": args.epochs, "expert_episodes_per_terrain": args.episodes, "torch": torch.__version__, "python": platform.python_version(), "platform": platform.platform(), "cargo_lock_sha256": hashlib.sha256(Path("Cargo.lock").read_bytes()).hexdigest(), "policy_sha256": hashlib.sha256(args.output.read_bytes()).hexdigest(), "parity_samples": len(samples), "parity_max_absolute_error": max_error, "parity_tolerance": 2e-5, "evaluation": evaluation}
+    if args.onnx_output:
+        from .export_onnx import export_onnx
+        export_onnx(model, mean, scale, args.onnx_output)
+        report["onnx"] = {
+            "path": str(args.onnx_output),
+            "sha256": hashlib.sha256(args.onnx_output.read_bytes()).hexdigest(),
+            "parity_max_absolute_error": verify(model, mean, scale, args.onnx_output, samples),
+            "evaluation": evaluate(args.onnx_output, args.seed + 1000),
+        }
     args.output.with_suffix(".report.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))
 

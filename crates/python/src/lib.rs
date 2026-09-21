@@ -1,4 +1,4 @@
-use ml_cars_controllers::{Batch, Policy};
+use ml_cars_controllers::{Batch, load_policy};
 use ml_cars_sim::{Action, OBS_DIM, Scenario, StepResult};
 use numpy::{
     IntoPyArray, PyReadonlyArray2, PyReadonlyArray3, PyUntypedArrayMethods,
@@ -184,14 +184,14 @@ fn policy_actions<'py>(
     if observations.shape()[1] != OBS_DIM {
         return Err(err("observation dimension mismatch".into()));
     }
-    let p = Policy::load(path).map_err(err)?;
+    let mut p = load_policy(path).map_err(err)?;
     let mut out = Vec::new();
     for row in observations.as_array().rows() {
         let o: Vec<f32> = row.iter().copied().collect();
         if o.iter().any(|x| !x.is_finite()) {
             return Err(err("observations must be finite".into()));
         }
-        let a = p.infer(o.as_slice().try_into().unwrap());
+        let a = p.action(o.as_slice().try_into().unwrap()).map_err(err)?;
         out.extend([a.throttle, a.steering]);
     }
     Ok(Array2::from_shape_vec((observations.shape()[0], 2), out)

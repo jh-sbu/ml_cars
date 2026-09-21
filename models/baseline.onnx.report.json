@@ -1,0 +1,72 @@
+{
+  "source_policy": "models/baseline.json",
+  "source_sha256": "332122d0ff898509e16bd8836b1208f1dc73fdc048ab5300f0423f823b373966",
+  "onnx_sha256": "18b63819a8f8afe85b66b74e52692fcf26cd1586a264774875b90b6c6c7aa58c",
+  "cargo_lock_sha256": "0178597efbcca2b4bf8b4bc6afa8acfbc4571bccc93847b3b6e9d51b6de551cc",
+  "torch": "2.14.0+cpu",
+  "onnx": "1.23.0",
+  "onnxruntime": "1.30.0",
+  "opset": 18,
+  "input_shape": [
+    1,
+    18
+  ],
+  "output_shape": [
+    1,
+    2
+  ],
+  "normalization": "embedded",
+  "parity_samples": 512,
+  "parity_max_absolute_error": 1.6391277313232422e-07,
+  "parity_tolerance": 2e-05,
+  "evaluation": [
+    {
+      "terrain": "flat",
+      "seed": 1007,
+      "reason": "success",
+      "reward": 109.64833698701113
+    },
+    {
+      "terrain": "flat",
+      "seed": 1008,
+      "reason": "success",
+      "reward": 109.61006744066253
+    },
+    {
+      "terrain": "flat",
+      "seed": 1009,
+      "reason": "success",
+      "reward": 109.90494980942458
+    },
+    {
+      "terrain": "flat",
+      "seed": 1010,
+      "reason": "success",
+      "reward": 109.9303145443555
+    },
+    {
+      "terrain": "hills",
+      "seed": 1007,
+      "reason": "success",
+      "reward": 109.87740805838257
+    },
+    {
+      "terrain": "hills",
+      "seed": 1008,
+      "reason": "success",
+      "reward": 109.84679968841374
+    },
+    {
+      "terrain": "hills",
+      "seed": 1009,
+      "reason": "success",
+      "reward": 110.07585961883888
+    },
+    {
+      "terrain": "hills",
+      "seed": 1010,
+      "reason": "success",
+      "reward": 110.01673793769442
+    }
+  ]
+}

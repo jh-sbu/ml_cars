@@ -57,13 +57,13 @@ fn controller_state_is_independent() {
     let mut obs = [0.; OBS_DIM];
     obs[0] = 0.48;
     obs[4] = 0.8;
-    let first = b.action(&obs);
+    let first = b.action(&obs).unwrap();
     for _ in 0..20 {
-        a.action(&obs);
+        a.action(&obs).unwrap();
     }
-    assert!(a.action(&obs).throttle > first.throttle);
+    assert!(a.action(&obs).unwrap().throttle > first.throttle);
     b.reset();
-    assert_eq!(b.action(&obs).throttle, first.throttle);
+    assert_eq!(b.action(&obs).unwrap().throttle, first.throttle);
 }
 #[test]
 fn malformed_policy_shapes_are_rejected() {
